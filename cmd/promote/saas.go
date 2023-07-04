@@ -1,8 +1,9 @@
-package saas
+package promote
 
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/openshift/osdctl/cmd/promote/git"
 	"github.com/openshift/osdctl/internal/utils/globalflags"
@@ -86,4 +87,64 @@ func (o *saasOptions) validateSaasFlow() {
 		fmt.Printf("--gitHash is the target git commit in the service, if not specified defaults to HEAD of master\n\n")
 		return
 	}
+}
+
+func listServiceNames() error {
+	services, err := GetServiceNames(OSDSaasDir, BPSaasDir, CADSaasDir)
+	if err != nil {
+		return err
+	}
+
+	sort.Strings(services)
+	fmt.Println("### Available service names ###")
+	for _, service := range services {
+		fmt.Println(service)
+	}
+
+	return nil
+}
+
+func servicePromotion(serviceName, gitHash string, osd, hcp bool) error {
+	services, err := GetServiceNames(OSDSaasDir, BPSaasDir, CADSaasDir)
+	if err != nil {
+		return err
+	}
+
+	err = validateServiceName(services, serviceName)
+	if err != nil {
+		return err
+	}
+
+	saasDir, err := getSaasDir(serviceName, osd, hcp)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("SAAS Directory: %v\n", saasDir)
+
+	serviceData, err := os.ReadFile(saasDir)
+	if err != nil {
+		return fmt.Errorf("failed to read SAAS file: %v", err)
+	}
+
+	currentGitHash, serviceRepo, err := git.GetCurrentGitHashFromAppInterface(serviceData, serviceName)
+	if err != nil {
+		return fmt.Errorf("failed to get current git hash or service repo: %v", err)
+	}
+	fmt.Printf("Current Git Hash: %v\nGit Repo: %v\n\n", currentGitHash, serviceRepo)
+
+	promotionGitHash, err := git.CheckoutAndCompareGitHash(serviceRepo, gitHash, currentGitHash)
+	if err != nil {
+		return fmt.Errorf("failed to checkout and compare git hash: %v", err)
+	} else if promotionGitHash == "" {
+		fmt.Printf("Unable to find a git hash to promote. Exiting.\n")
+		os.Exit(6)
+	}
+	fmt.Printf("Service: %s will be promoted to %s\n", serviceName, promotionGitHash)
+
+	err = git.UpdateAndCommitChangesForAppInterface(serviceName, saasDir, currentGitHash, promotionGitHash)
+	if err != nil {
+		fmt.Printf("FAILURE: %v\n", err)
+	}
+
+	return nil
 }

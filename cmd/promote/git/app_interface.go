@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 
+	"github.com/go-git/go-git/v5"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,30 +22,34 @@ type Service struct {
 }
 
 func BootstrapOsdCtlForAppInterfaceAndServicePromotions() {
-	_, err := getBaseDir()
+	baseDir, err := GetBaseDir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = checkAppInterfaceCheckout()
+	err = checkAppInterfaceCheckout(baseDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = checkBehindMaster()
+	err = checkBehindMaster(baseDir)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
 // checkAppInterfaceCheckout checks if the script is running in the checkout of app-interface
-func checkAppInterfaceCheckout() error {
-	cmd := exec.Command("git", "remote", "-v")
-	cmd.Dir = BaseDir
-	output, err := cmd.CombinedOutput()
+func checkAppInterfaceCheckout(appInterfaceDir string) error {
+	repo, err := git.PlainOpen(appInterfaceDir)
 	if err != nil {
-		return fmt.Errorf("error executing 'git remote -v': %v", err)
+		return fmt.Errorf("failed to open repository at '%s': %w", appInterfaceDir, err)
+	}
+	remotes, err := repo.Remotes()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve remotes for repository: %w", err)
 	}
 
-	outputString := string(output)
+	for _, remote := range remotes {
+		remote.r
+	}
 
 	// Check if the output contains the app-interface repository URL
 	if !strings.Contains(outputString, "gitlab.cee.redhat.com") && !strings.Contains(outputString, "app-interface") {

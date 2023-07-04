@@ -2,67 +2,72 @@ package git
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
-	"sync"
+	"os"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 var (
-	baseDirOnce sync.Once
-	BaseDir     string
-	baseDirErr  error
+	baseDir string
 )
 
-// getBaseDir returns the base directory of the git repository, this can only be called once per process
-func getBaseDir() (string, error) {
-	baseDirOnce.Do(func() {
-		baseDirCmd := exec.Command("git", "rev-parse", "--show-toplevel")
-		baseDirOutput, err := baseDirCmd.Output()
+// GetBaseDir returns the base directory of the git repository
+func GetBaseDir() (string, error) {
+	if baseDir == "" {
+		var err error
+		baseDir, err = os.Getwd()
 		if err != nil {
-			baseDirErr = err
-			return
+			return "", fmt.Errorf("failed to determine current working directory: %w", err)
 		}
-
-		BaseDir = strings.TrimSpace(string(baseDirOutput))
-	})
-
-	return BaseDir, baseDirErr
+	}
+	return baseDir, nil
 }
 
-func checkBehindMaster() error {
+func checkBehindMaster(appInterfaceDir string) error {
 	fmt.Printf("### Checking 'master' branch is up to date ###\n")
 
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = BaseDir
-	output, err := cmd.Output()
+	repo, err := git.PlainOpen(appInterfaceDir)
 	if err != nil {
-		return fmt.Errorf("error executing git rev-parse command: %v", err)
+		return fmt.Errorf("failed to open git repository: %w", err)
 	}
-
-	branch := strings.TrimSpace(string(output))
-	if branch != "master" {
+	head, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve head: %w", err)
+	}
+	if head.Name() != plumbing.Master {
 		return fmt.Errorf("you are not on the 'master' branch")
 	}
 
 	// Fetch the latest changes from the upstream repository
-	cmd = exec.Command("git", "fetch", "upstream")
-	cmd.Dir = BaseDir
-	err = cmd.Run()
+	err = repo.Fetch(&git.FetchOptions{RemoteName: "upstream"})
 	if err != nil {
-		return fmt.Errorf("error executing git fetch command: %v", err)
+		return fmt.Errorf("failed to fetch 'upstream' remote: %w", err)
 	}
 
-	cmd = exec.Command("git", "rev-list", "--count", "HEAD..upstream/master")
-	cmd.Dir = BaseDir
-	output, err = cmd.Output()
+	commits, err := repo.Log(&git.LogOptions{})
 	if err != nil {
-		return fmt.Errorf("error executing git rev-list command: %v", err)
+		return fmt.Errorf("failed to retrieve commit history: %W", err)
 	}
 
-	behindCount := strings.TrimSpace(string(output))
-	if behindCount != "0" {
-		return fmt.Errorf("you are behind 'master' by this many commits: %s", behindCount)
-	}
+	commits.ForEach(func(c *object.Commit) error {
+		return nil
+	})
+
+	
+
+//	cmd = exec.Command("git", "rev-list", "--count", "HEAD..upstream/master")
+//	cmd.Dir = BaseDir
+//	output, err = cmd.Output()
+//	if err != nil {
+//		return fmt.Errorf("error executing git rev-list command: %v", err)
+//	}
+
+//	behindCount := strings.TrimSpace(string(output))
+//	if behindCount != "0" {
+//		return fmt.Errorf("you are behind 'master' by this many commits: %s", behindCount)
+//	}
 	fmt.Printf("### 'master' branch is up to date ###\n\n")
 
 	return nil

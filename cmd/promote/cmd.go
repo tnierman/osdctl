@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
-	"github.com/openshift/osdctl/cmd/promote/saas"
 	"github.com/openshift/osdctl/internal/utils/globalflags"
 )
 
@@ -19,7 +18,8 @@ func NewCmdPromote(flags *genericclioptions.ConfigFlags, globalOpts *globalflags
 		DisableAutoGenTag: true,
 	}
 
-	promoteCmd.AddCommand(saas.NewCmdSaas(flags, globalOpts))
+	promoteCmd.AddCommand(NewCmdSaas(flags, globalOpts))
+	promoteCmd.AddCommand(NewCmdPackage(flags, globalOpts))
 
 	return promoteCmd
 }
@@ -30,3 +30,4 @@ func help(cmd *cobra.Command, _ []string) {
 		fmt.Println("Error while calling cmd.Help(): ", err.Error())
 	}
 }
+
