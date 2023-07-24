@@ -30,6 +30,7 @@ import (
 	"github.com/openshift/osdctl/cmd/network"
 	"github.com/openshift/osdctl/cmd/org"
 	"github.com/openshift/osdctl/cmd/promote"
+	"github.com/openshift/osdctl/cmd/report"
 	"github.com/openshift/osdctl/cmd/servicelog"
 	"github.com/openshift/osdctl/cmd/sts"
 	"github.com/openshift/osdctl/internal/utils/globalflags"
@@ -96,6 +97,10 @@ func NewCmdRoot(streams genericclioptions.IOStreams) *cobra.Command {
 	rootCmd.AddCommand(sts.NewCmdSts())
 	rootCmd.AddCommand(promote.NewCmdPromote())
 	rootCmd.AddCommand(jira.Cmd)
+	rootCmd.AddCommand(report.NewCmdReport(streams, kubeFlags))
+
+	// add completion command
+	rootCmd.AddCommand(newCmdCompletion())
 
 	// Add cost command to use AWS Cost Manager
 	rootCmd.AddCommand(cost.NewCmdCost(streams, globalOpts))

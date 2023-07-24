@@ -162,7 +162,7 @@ func (o *contextOptions) complete(cmd *cobra.Command, args []string) error {
 		o.oauthtoken = viper.GetString(pagerduty.PagerDutyOauthTokenConfigKey)
 	}
 
-	orgID, err := utils.GetOrgfromClusterID(ocmClient, *cluster)
+	orgID, err := utils.GetOrgIDFromCluster(ocmClient, *cluster)
 	if err != nil {
 		fmt.Printf("Failed to get Org ID for cluster ID %s - err: %q", o.clusterID, err)
 		o.organizationID = ""

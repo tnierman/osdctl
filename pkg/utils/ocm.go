@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	sdk "github.com/openshift-online/ocm-sdk-go"
+	accountsmgmtv1 "github.com/openshift-online/ocm-sdk-go/accountsmgmt/v1"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
 )
 
@@ -90,7 +91,7 @@ func GetClusters(ocmClient *sdk.Connection, clusterIds []string) []*cmv1.Cluster
 	return clusters
 }
 
-func GetOrgfromClusterID(ocmClient *sdk.Connection, cluster cmv1.Cluster) (string, error) {
+func GetOrgIDFromCluster(ocmClient *sdk.Connection, cluster cmv1.Cluster) (string, error) {
 	subID, ok := cluster.Subscription().GetID()
 	if !ok {
 		return "", fmt.Errorf("failed getting sub id")
@@ -107,6 +108,19 @@ func GetOrgfromClusterID(ocmClient *sdk.Connection, cluster cmv1.Cluster) (strin
 	}
 
 	return respSlice[0].OrganizationID(), nil
+}
+
+func GetOrgFromID(ocmClient *sdk.Connection, orgID string) (accountsmgmtv1.Organization, error) {
+	response, err := ocmClient.AccountsMgmt().V1().Organizations().Organization(orgID).Get().Send()
+	if err != nil {
+		return accountsmgmtv1.Organization{}, err
+	}
+
+	if response.Error() != nil {
+		return accountsmgmtv1.Organization{}, response.Error()
+	}
+
+	return *response.Body(), nil
 }
 
 // ApplyFilters retrieves clusters in OCM which match the filters given
