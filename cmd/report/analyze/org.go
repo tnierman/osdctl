@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 )
 
 func NewCmdOrg(streams genericclioptions.IOStreams, flags *genericclioptions.ConfigFlags) *cobra.Command {
-	analyzer := NewOrgAnalyzer(streams, flags)
+	analyzer := NewOrgAnalyzer(streams)
 	cmd := &cobra.Command{
 		Use: "org <report file path>",
 		Aliases: []string{"orgs", "organization", "organizations"},
@@ -44,24 +45,22 @@ func NewCmdOrg(streams genericclioptions.IOStreams, flags *genericclioptions.Con
 		},
 	}
 
-	cmd.Flags().StringVarP(&analyzer.output, "output", "o", "long", "Specify how the results are displayed. Options are 'short', 'yaml', 'json', 'long'. If not specified, 'long' is used")
-	cmd.Flags().IntVarP(&analyzer.numOrgs, "number", "n", 5, "Specify the number of organizations displayed when summarizing data. Only used when '--output/-o' is 'short'. Default is 3")
+	cmd.Flags().StringVarP(&analyzer.Output, "output", "o", "long", "Specify how the results are displayed. Options are 'short', 'yaml', 'json', 'long'. If not specified, 'long' is used")
+	cmd.Flags().IntVarP(&analyzer.NumOrgs, "number", "n", 5, "Specify the number of organizations displayed when summarizing data. Values <= 0 indicate that all results should be displayed. Only used when '--output/-o' is 'short' or 'long' ('json' and 'yaml' will always print the full analysis). Default is 5")
+	cmd.Flags().StringVar(&analyzer.SearchRegex, "search", "", "Specify a pattern to match against. Patterns are validated using https://github.com/google/re2/wiki/Syntax. Only organizations whose name or ID matches the provided pattern will be included in the final results")
 	return cmd
 }
 
 func validateAnalyzer(o OrgAnalyzer) error {
-	switch o.output {
+	switch o.Output {
 	case "yaml":
 	case "json":
 	case "short":
 	case "long":
 	default:
-		return fmt.Errorf("invalid output format provided with '--output/-o'. Valid options are one of 'short', 'yaml', 'json'")
+		return fmt.Errorf("invalid output format provided with '--output/-o'. Valid options are one of 'short', 'long', 'yaml', or 'json'")
 	}
 
-	if o.numOrgs < 1 {
-		return fmt.Errorf("invalid organization count provided with '--org-count/-c': expected 1 or more, got %d", o.numOrgs)
-	}
 	return nil
 }
 
@@ -77,24 +76,26 @@ type OrgAnalyzer struct {
 
 	// Flags
 
-	// output specifies the output type
+	// Output specifies the output type
 	// Only 'yaml', 'json', 'short' are valid
-	output string
-	// numOrgs defines the number of organizations which should be summarized. (ie - if numOrgs = 3, then
+	Output string
+	// NumOrgs defines the number of organizations which should be summarized. (ie - if numOrgs = 3, then
 	// the top 3 organizations will be displayed when calling Summarize() ). This value is only used when
 	// the output = 'short'
-	numOrgs int
-	*genericclioptions.ConfigFlags `json:"-" yaml:"-"`
+	NumOrgs int
+	// SearchRegex defines the search pattern applied to orgs. Any orgs' statistics not matching the pattern will not be added to the Analyzer
+	// Regex patterns must conform to the following conventions: https://github.com/google/re2/wiki/Syntax
+	SearchRegex string
 
 	// Streams
 	genericclioptions.IOStreams `json:"-" yaml:"-"`
 }
 
-func NewOrgAnalyzer(streams genericclioptions.IOStreams, flags *genericclioptions.ConfigFlags) OrgAnalyzer {
+//func NewOrgAnalyzer(streams genericclioptions.IOStreams, flags *genericclioptions.ConfigFlags) OrgAnalyzer {
+func NewOrgAnalyzer(streams genericclioptions.IOStreams) OrgAnalyzer {
 	o := OrgAnalyzer{
 		OrganizationStatsList: NewOrganizationStatsList(),
 		IOStreams: streams,
-		ConfigFlags: flags,
 	}
 	return o
 }
@@ -115,6 +116,8 @@ func (o OrgAnalyzer) Errorln(msg string) {
 }
 
 // Analyze ingests the provided report, adding its data to the OrgAnalyzer's statistics
+// If defined, only those orgs whose name or ID matches the OrgAnalyzer's SearchRegex pattern
+// have their metrics ingested
 func (o *OrgAnalyzer) Analyze(reportFilePath string) error {
 	report, err := o.openReport(reportFilePath)
 	if err != nil {
@@ -160,7 +163,27 @@ func (o *OrgAnalyzer) Analyze(reportFilePath string) error {
 		org, err := utils.GetOrgFromID(ocmClient, orgID)
 		if err != nil {
 			o.Errorln(fmt.Sprintf("failed to retrieve organization with ID '%s' from OCM: %v", orgID, err))
+			o.SkippedEntries++
 			continue
+		}
+		if o.SearchRegex != "" {
+			matchName, err := regexp.MatchString(o.SearchRegex, org.Name())
+			if err != nil {
+				o.Errorln(fmt.Sprintf("failed to compare organization name '%s' to provided search string '%s': %v", org.Name(), o.SearchRegex, err))
+				o.SkippedEntries++
+				continue
+			}
+
+			matchID, err := regexp.MatchString(o.SearchRegex, org.ID())
+			if err != nil {
+				o.Errorln(fmt.Sprintf("failed to compare organization ID '%s' to provided search string '%s': %v", org.ID(), o.SearchRegex, err))
+				o.SkippedEntries++
+				continue
+			}
+			if !matchName && !matchID {
+				// Do not index this as a SkippedEntry: we know that this cluster belongs to an org which the user wishes to ignore.
+				continue
+			}
 		}
 		o.AddStatistic(org, *cluster, alert)
 	}
@@ -189,7 +212,7 @@ func (o OrgAnalyzer) parseEntry(entry []string) (clusterID string, alert string)
 // Summarize prints the OrgAnalyzer's results. The format returned is based on the OrgAnalyzer's .output field.
 // Data is sent via the OrgAnalyzer's IOStreams
 func (o OrgAnalyzer) Summarize() error {
-	switch o.output {
+	switch o.Output {
 	case "yaml":
 		err := o.printYamlSummary()
 		if err != nil {
@@ -222,7 +245,7 @@ func (o OrgAnalyzer) printShortSummary() {
 	if skipPercentage > 0.3 {
 		o.Errorln(color.RedString("High skip percentage detected: results may be skewed"))
 	}
-	topOrgs := o.TopOrgs(o.numOrgs)
+	topOrgs := o.TopOrgs(o.NumOrgs)
 	for _, org := range topOrgs {
 		o.Println(fmt.Sprintf("%s: %s [%s]", color.GreenString("Organization"), org.Organization.Name(), org.Organization.ID()))
 		o.Println(fmt.Sprintf("\t%s: %d across %d cluster(s)\n", color.BlueString("Total Alerts"), org.TotalAlerts, len(org.Clusters)))
@@ -241,7 +264,7 @@ func (o OrgAnalyzer) printLongSummary() {
 	if skipPercentage > 0.3 {
 		o.Errorln(color.RedString("High skip percentage detected: results may be skewed"))
 	}
-	topOrgs := o.TopOrgs(o.numOrgs)
+	topOrgs := o.TopOrgs(o.NumOrgs)
 	for _, org := range topOrgs {
 		o.Println(fmt.Sprintf("%s: %s [%s]", color.GreenString("Organization"), org.Organization.Name(), org.Organization.ID()))
 		o.Println(fmt.Sprintf("\t%s: %d across %d cluster(s)", color.BlueString("Total Alerts"), org.TotalAlerts, len(org.Clusters)))
@@ -253,7 +276,7 @@ func (o OrgAnalyzer) printLongSummary() {
 			o.Println(fmt.Sprintf("\t  %d alerts across %d symptoms", cluster.TotalAlerts, len(cluster.Alerts)))
 			o.Println(fmt.Sprintf("\t\t* %.2f percent of all alerts", o.CalculatePercentageOfTotal(cluster.TotalAlerts)))
 			o.Println(fmt.Sprintf("\t\t* %.2f percent of analyzed (not skipped) alerts", o.CalculatePercentageOfAnalyzed(cluster.TotalAlerts)))
-			o.Println(fmt.Sprintf("\t%s:", color.GreenString("Alerts")))
+			o.Println(fmt.Sprintf("\t  %s:", color.GreenString("Alerts")))
 			for alert, count:= range cluster.Alerts {
 				o.Println(fmt.Sprintf("\t\t* %s -- %d", alert, count))
 			}
@@ -304,6 +327,7 @@ func NewOrganizationStatsList() OrganizationStatsList {
 	return o
 }
 
+// AddStatistic adds the provided statistics to the proper organization within OrganizationStatsList
 func (o *OrganizationStatsList) AddStatistic(org accountsmgmtv1.Organization, cluster clustersmgmtv1.Cluster, alert string) {
 	orgStats, found := o.Items[org.ID()]
 	if !found {
@@ -313,6 +337,9 @@ func (o *OrganizationStatsList) AddStatistic(org accountsmgmtv1.Organization, cl
 	o.Items[org.ID()] = orgStats
 }
 
+// TopOrgs returns a slice containing the Organizations with the most alerts in the
+// OrganizationStatsList in reverse order (sorry).
+// If the provided numOrgs is <= 0, then all organizations are returned
 func (o OrganizationStatsList) TopOrgs(numOrgs int) []OrganizationStats {
 	stats := []OrganizationStats{}
 	for _, orgStats := range o.Items {
@@ -324,6 +351,9 @@ func (o OrganizationStatsList) TopOrgs(numOrgs int) []OrganizationStats {
 		}
 		return false
 	})
+	if numOrgs <= 0 || numOrgs > len(stats) {
+		return stats
+	}
 	return stats[len(stats)-numOrgs:]
 }
 
