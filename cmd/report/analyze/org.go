@@ -267,6 +267,7 @@ func (o OrgAnalyzer) printLongSummary() {
 	topOrgs := o.TopOrgs(o.NumOrgs)
 	for _, org := range topOrgs {
 		o.Println(fmt.Sprintf("%s: %s [%s]", color.GreenString("Organization"), org.Organization.Name(), org.Organization.ID()))
+		o.Println(fmt.Sprintf("\t%s: %s", color.GreenString("EBS Account ID"), org.Organization.EbsAccountID()))
 		o.Println(fmt.Sprintf("\t%s: %d across %d cluster(s)", color.BlueString("Total Alerts"), org.TotalAlerts, len(org.Clusters)))
 		o.Println(fmt.Sprintf("\t- %.2f percent of all alerts", o.CalculatePercentageOfTotal(org.TotalAlerts)))
 		o.Println(fmt.Sprintf("\t- %.2f percent of analyzed (not skipped) alerts", o.CalculatePercentageOfAnalyzed(org.TotalAlerts)))
